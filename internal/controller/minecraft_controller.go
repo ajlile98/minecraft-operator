@@ -30,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -463,8 +462,8 @@ func (r *MinecraftReconciler) serviceForMinecraft(
 				{
 					Name:     "minecraft",
 					Protocol: corev1.ProtocolTCP,
-					// Port:       25565,
-					TargetPort: intstr.FromInt(25565),
+					Port:     25565,
+					// TargetPort: intstr.FromInt(25565),
 				},
 			},
 		},
@@ -496,9 +495,12 @@ func labelsForMinecraft(name string) map[string]string {
 // from the MINECRAFT_IMAGE environment variable defined in the config/manager/manager.yaml
 func imageForMinecraft() (string, error) {
 	var imageEnvVar = "MINECRAFT_IMAGE"
+	var defaultImage = "itzg/minecraft-server:latest"
 	image, found := os.LookupEnv(imageEnvVar)
 	if !found {
-		return "", fmt.Errorf("Unable to find %s environment variable with the image", imageEnvVar)
+		// return "", fmt.Errorf("Unable to find %s environment variable with the image", imageEnvVar)
+		log.Log.Info("MINECRAFT_IMAGE environment variable not found, using default image: %s", defaultImage)
+		return defaultImage, nil
 	}
 	return image, nil
 }
