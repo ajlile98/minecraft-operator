@@ -30,7 +30,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -270,6 +269,45 @@ func (r *MinecraftReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
+	configmap := &corev1.ConfigMap{}
+	err = r.Get(ctx, types.NamespacedName{Name: minecraft.Name, Namespace: minecraft.Namespace}, configmap)
+	if err != nil && apierrors.IsNotFound(err) {
+		// Define new configmap
+		cm, err := r.configmapForMinecraft(minecraft)
+		if err != nil {
+			log.Error(err, "Failed to create new ConfigMap resource for Minecraft")
+
+			// the following will update the status
+			meta.SetStatusCondition(&minecraft.Status.Conditions, metav1.Condition{Type: typeAvailableMinecraft,
+				Status: metav1.ConditionFalse, Reason: "Reconciling",
+				Message: fmt.Sprintf("Failed to creat ConfigMap for the custom resource (%s): (%s)", minecraft.Name, err)})
+
+			if err := r.Status().Update(ctx, minecraft); err != nil {
+				log.Error(err, "Failed to update Minecraft Status")
+				return ctrl.Result{}, err
+			}
+
+			return ctrl.Result{}, err
+		}
+
+		log.Info("Creating a new ConfigMap",
+			"ConfigMap.Namespace", cm.Namespace, "ConfigMap.Name", cm.Name)
+		if err = r.Create(ctx, cm); err != nil {
+			log.Error(err, "Failed to create a new ConfigMap",
+				"ConfigMap.Namespace", cm.Namespace, "Service.Name", cm.Name)
+			return ctrl.Result{}, err
+		}
+
+		// ConfigMap created Successfully
+		// Requeue reconciliation so that we can ensure the state
+		// and move forward for the next operations
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
+	} else if err != nil {
+		log.Error(err, "Failed to get ConfigMap")
+		// return error for the reconciliation be retriggered
+		return ctrl.Result{}, err
+	}
+
 	// The CRD API defines that the Minecraft type have a MinecraftSpec.Size field
 	// to set the quantity of Deployment instances to the desired state on the cluster.
 	// Therefore, the following code will ensure the Deployment size is the same as defined
@@ -416,7 +454,7 @@ func (r *MinecraftReconciler) deploymentForMinecraft(
 							{
 								ConfigMapRef: &corev1.ConfigMapEnvSource{
 									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "minecraft-config",
+										Name: minecraft.Name,
 									},
 								},
 							},
@@ -463,8 +501,8 @@ func (r *MinecraftReconciler) serviceForMinecraft(
 				{
 					Name:     "minecraft",
 					Protocol: corev1.ProtocolTCP,
-					// Port:       25565,
-					TargetPort: intstr.FromInt(25565),
+					Port:     25565,
+					// TargetPort: intstr.FromInt(25565),
 				},
 			},
 		},
@@ -476,6 +514,26 @@ func (r *MinecraftReconciler) serviceForMinecraft(
 		return nil, err
 	}
 	return service, nil
+}
+
+func (r *MinecraftReconciler) configmapForMinecraft(
+	minecraft *cachev1alpha1.Minecraft) (*corev1.ConfigMap, error) {
+	ls := labelsForMinecraft(minecraft.Name)
+	configmap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      minecraft.Name,
+			Namespace: minecraft.Namespace,
+			Labels:    ls,
+		},
+		Data: map[string]string{
+			"EULA": "TRUE",
+		},
+	}
+
+	if err := ctrl.SetControllerReference(minecraft, configmap, r.Scheme); err != nil {
+		return nil, err
+	}
+	return configmap, nil
 }
 
 // labelsForMinecraft returns the labels for selecting the resources
@@ -496,9 +554,12 @@ func labelsForMinecraft(name string) map[string]string {
 // from the MINECRAFT_IMAGE environment variable defined in the config/manager/manager.yaml
 func imageForMinecraft() (string, error) {
 	var imageEnvVar = "MINECRAFT_IMAGE"
+	var defaultImage = "itzg/minecraft-server:latest"
 	image, found := os.LookupEnv(imageEnvVar)
 	if !found {
-		return "", fmt.Errorf("Unable to find %s environment variable with the image", imageEnvVar)
+		// return "", fmt.Errorf("Unable to find %s environment variable with the image", imageEnvVar)
+		log.Log.Info("MINECRAFT_IMAGE environment variable not found, using default image: %s", defaultImage)
+		return defaultImage, nil
 	}
 	return image, nil
 }
