@@ -396,6 +396,9 @@ func (r *MinecraftReconciler) deploymentForMinecraft(
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      minecraft.Name,
 			Namespace: minecraft.Namespace,
+			Annotations: map[string]string{
+				"reloader.stakater.com/auto": "true",
+			},
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
