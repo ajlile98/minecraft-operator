@@ -463,6 +463,24 @@ func (r *MinecraftReconciler) statefulsetForMinecraft(
 								},
 							},
 						},
+						LivenessProbe: &corev1.Probe{
+							InitialDelaySeconds: 90,
+							PeriodSeconds:       15,
+							ProbeHandler: corev1.ProbeHandler{
+								Exec: &corev1.ExecAction{
+									Command: []string{"mc-monitor", "status"},
+								},
+							},
+						},
+						ReadinessProbe: &corev1.Probe{
+							InitialDelaySeconds: 30,
+							PeriodSeconds:       15,
+							ProbeHandler: corev1.ProbeHandler{
+								Exec: &corev1.ExecAction{
+									Command: []string{"mc-monitor", "status"},
+								},
+							},
+						},
 						// TODO(user): Uncomment the following code to configure the resources
 						// Ensure restrictive context for the container
 						// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
