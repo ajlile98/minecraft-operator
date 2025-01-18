@@ -43,7 +43,7 @@ const minecraftFinalizer = "cache.example.com/finalizer"
 
 // Definitions to manage status conditions
 const (
-	// typeAvailableMinecraft represents the status of the Deployment reconciliation
+	// typeAvailableMinecraft represents the status of the Statefulset reconciliation
 	typeAvailableMinecraft = "Available"
 	// typeDegradedMinecraft represents the status used when the custom resource is deleted and the finalizer operations are yet to occur.
 	typeDegradedMinecraft = "Degraded"
@@ -65,6 +65,7 @@ type MinecraftReconciler struct {
 // +kubebuilder:rbac:groups=cache.example.com,resources=minecrafts/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -190,19 +191,19 @@ func (r *MinecraftReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, nil
 	}
 
-	// Check if the deployment already exists, if not create a new one
-	found := &appsv1.Deployment{}
+	// Check if the statefulset already exists, if not create a new one
+	found := &appsv1.StatefulSet{}
 	err = r.Get(ctx, types.NamespacedName{Name: minecraft.Name, Namespace: minecraft.Namespace}, found)
 	if err != nil && apierrors.IsNotFound(err) {
-		// Define a new deployment
-		dep, err := r.deploymentForMinecraft(minecraft)
+		// Define a new statefulset
+		statefulset, err := r.statefulsetForMinecraft(minecraft)
 		if err != nil {
-			log.Error(err, "Failed to define new Deployment resource for Minecraft")
+			log.Error(err, "Failed to define new StatefulSet resource for Minecraft")
 
 			// The following implementation will update the status
 			meta.SetStatusCondition(&minecraft.Status.Conditions, metav1.Condition{Type: typeAvailableMinecraft,
 				Status: metav1.ConditionFalse, Reason: "Reconciling",
-				Message: fmt.Sprintf("Failed to create Deployment for the custom resource (%s): (%s)", minecraft.Name, err)})
+				Message: fmt.Sprintf("Failed to create StatefulSet for the custom resource (%s): (%s)", minecraft.Name, err)})
 
 			if err := r.Status().Update(ctx, minecraft); err != nil {
 				log.Error(err, "Failed to update Minecraft status")
@@ -212,25 +213,25 @@ func (r *MinecraftReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 
-		log.Info("Creating a new Deployment",
-			"Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
-		if err = r.Create(ctx, dep); err != nil {
-			log.Error(err, "Failed to create new Deployment",
-				"Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+		log.Info("Creating a new StatefulSet",
+			"StatefulSet.Namespace", statefulset.Namespace, "StatefulSet.Name", statefulset.Name)
+		if err = r.Create(ctx, statefulset); err != nil {
+			log.Error(err, "Failed to create new StatefulSet",
+				"StatefulSet.Namespace", statefulset.Namespace, "StatefulSet.Name", statefulset.Name)
 			return ctrl.Result{}, err
 		}
 
-		// Deployment created successfully
+		// StatefulSet created successfully
 		// We will requeue the reconciliation so that we can ensure the state
 		// and move forward for the next operations
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	} else if err != nil {
-		log.Error(err, "Failed to get Deployment")
+		log.Error(err, "Failed to get StatefulSet")
 		// Let's return the error for the reconciliation be re-trigged again
 		return ctrl.Result{}, err
 	}
 
-	// create a service for the Minecraft deployment
+	// create a service for the Minecraft Statefulset
 	service := &corev1.Service{}
 	err = r.Get(ctx, types.NamespacedName{Name: minecraft.Name, Namespace: minecraft.Namespace}, service)
 	if err != nil && apierrors.IsNotFound(err) {
@@ -309,15 +310,15 @@ func (r *MinecraftReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// The CRD API defines that the Minecraft type have a MinecraftSpec.Size field
-	// to set the quantity of Deployment instances to the desired state on the cluster.
-	// Therefore, the following code will ensure the Deployment size is the same as defined
+	// to set the quantity of Statefulset instances to the desired state on the cluster.
+	// Therefore, the following code will ensure the Statefulset size is the same as defined
 	// via the Size spec of the Custom Resource which we are reconciling.
 	size := minecraft.Spec.Size
 	if *found.Spec.Replicas != size {
 		found.Spec.Replicas = &size
 		if err = r.Update(ctx, found); err != nil {
-			log.Error(err, "Failed to update Deployment",
-				"Deployment.Namespace", found.Namespace, "Deployment.Name", found.Name)
+			log.Error(err, "Failed to update Statefulset",
+				"Statefulset.Namespace", found.Namespace, "Statefulset.Name", found.Name)
 
 			// Re-fetch the minecraft Custom Resource before updating the status
 			// so that we have the latest state of the resource on the cluster and we will avoid
@@ -350,7 +351,7 @@ func (r *MinecraftReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// The following implementation will update the status
 	meta.SetStatusCondition(&minecraft.Status.Conditions, metav1.Condition{Type: typeAvailableMinecraft,
 		Status: metav1.ConditionTrue, Reason: "Reconciling",
-		Message: fmt.Sprintf("Deployment for custom resource (%s) with %d replicas created successfully", minecraft.Name, size)})
+		Message: fmt.Sprintf("Statefulset for custom resource (%s) with %d replicas created successfully", minecraft.Name, size)})
 
 	if err := r.Status().Update(ctx, minecraft); err != nil {
 		log.Error(err, "Failed to update Minecraft status")
@@ -368,9 +369,9 @@ func (r *MinecraftReconciler) doFinalizerOperationsForMinecraft(cr *cachev1alpha
 	// resources that are not owned by this CR, like a PVC.
 
 	// Note: It is not recommended to use finalizers with the purpose of deleting resources which are
-	// created and managed in the reconciliation. These ones, such as the Deployment created on this reconcile,
+	// created and managed in the reconciliation. These ones, such as the Statefulset created on this reconcile,
 	// are defined as dependent of the custom resource. See that we use the method ctrl.SetControllerReference.
-	// to set the ownerRef which means that the Deployment will be deleted by the Kubernetes API.
+	// to set the ownerRef which means that the Statefulset will be deleted by the Kubernetes API.
 	// More info: https://kubernetes.io/docs/tasks/administer-cluster/use-cascading-deletion/
 
 	// The following implementation will raise an event
@@ -380,10 +381,10 @@ func (r *MinecraftReconciler) doFinalizerOperationsForMinecraft(cr *cachev1alpha
 			cr.Namespace))
 }
 
-// deploymentForMinecraft returns a Minecraft Deployment object
-func (r *MinecraftReconciler) deploymentForMinecraft(
-	minecraft *cachev1alpha1.Minecraft) (*appsv1.Deployment, error) {
-	ls := labelsForMinecraft(minecraft.Name)
+// statefulsetForMinecraft returns a Minecraft StatefulSet object
+func (r *MinecraftReconciler) statefulsetForMinecraft(
+	minecraft *cachev1alpha1.Minecraft) (*appsv1.StatefulSet, error) {
+	ls := labelsForMinecraft(minecraft)
 	replicas := minecraft.Spec.Size
 
 	// Get the Operand image
@@ -392,7 +393,7 @@ func (r *MinecraftReconciler) deploymentForMinecraft(
 		return nil, err
 	}
 
-	dep := &appsv1.Deployment{
+	statefulset := &appsv1.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      minecraft.Name,
 			Namespace: minecraft.Namespace,
@@ -400,7 +401,7 @@ func (r *MinecraftReconciler) deploymentForMinecraft(
 				"reloader.stakater.com/auto": "true",
 			},
 		},
-		Spec: appsv1.DeploymentSpec{
+		Spec: appsv1.StatefulSetSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: ls,
@@ -481,18 +482,18 @@ func (r *MinecraftReconciler) deploymentForMinecraft(
 		},
 	}
 
-	// Set the ownerRef for the Deployment
+	// Set the ownerRef for the Statefulset
 	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
-	if err := ctrl.SetControllerReference(minecraft, dep, r.Scheme); err != nil {
+	if err := ctrl.SetControllerReference(minecraft, statefulset, r.Scheme); err != nil {
 		return nil, err
 	}
-	return dep, nil
+	return statefulset, nil
 }
 
 // serviceForMinecraft returns a Minecraft Service object
 func (r *MinecraftReconciler) serviceForMinecraft(
 	minecraft *cachev1alpha1.Minecraft) (*corev1.Service, error) {
-	ls := labelsForMinecraft(minecraft.Name)
+	ls := labelsForMinecraft(minecraft)
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      minecraft.Name,
@@ -521,7 +522,7 @@ func (r *MinecraftReconciler) serviceForMinecraft(
 
 func (r *MinecraftReconciler) configmapForMinecraft(
 	minecraft *cachev1alpha1.Minecraft) (*corev1.ConfigMap, error) {
-	ls := labelsForMinecraft(minecraft.Name)
+	ls := labelsForMinecraft(minecraft)
 	configmap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      minecraft.Name,
@@ -541,16 +542,18 @@ func (r *MinecraftReconciler) configmapForMinecraft(
 
 // labelsForMinecraft returns the labels for selecting the resources
 // More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
-func labelsForMinecraft(name string) map[string]string {
+func labelsForMinecraft(minecraft *cachev1alpha1.Minecraft) map[string]string {
 	var imageTag string
 	image, err := imageForMinecraft()
 	if err == nil {
 		imageTag = strings.Split(image, ":")[1]
 	}
-	return map[string]string{"app.kubernetes.io/name": "minecraft-operator",
-		"app.kubernetes.io/version":    imageTag,
-		"app.kubernetes.io/managed-by": "MinecraftController",
-	}
+	ls := minecraft.ObjectMeta.Labels
+	ls["app.kubernetes.io/name"] = "minecraft-operator"
+	ls["app.kubernetes.io/version"] = imageTag
+	ls["app.kubernetes.io/managed-by"] = "MinecraftController"
+
+	return ls
 }
 
 // imageForMinecraft gets the Operand image which is managed by this controller
@@ -567,11 +570,11 @@ func imageForMinecraft() (string, error) {
 }
 
 // SetupWithManager sets up the controller with the Manager.
-// Note that the Deployment will be also watched in order to ensure its
+// Note that the Statefulset will be also watched in order to ensure its
 // desirable state on the cluster
 func (r *MinecraftReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&cachev1alpha1.Minecraft{}).
-		Owns(&appsv1.Deployment{}).
+		Owns(&appsv1.StatefulSet{}).
 		Complete(r)
 }
