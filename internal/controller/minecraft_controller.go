@@ -560,8 +560,7 @@ func imageForMinecraft() (string, error) {
 	var defaultImage = "itzg/minecraft-server:latest"
 	image, found := os.LookupEnv(imageEnvVar)
 	if !found {
-		// return "", fmt.Errorf("Unable to find %s environment variable with the image", imageEnvVar)
-		log.Log.Info("MINECRAFT_IMAGE environment variable not found, using default image: %s", defaultImage)
+		log.Log.Info(fmt.Sprintf("MINECRAFT_IMAGE environment variable not found, using default image: %s", defaultImage))
 		return defaultImage, nil
 	}
 	return image, nil
