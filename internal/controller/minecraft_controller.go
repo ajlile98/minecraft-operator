@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -192,6 +193,41 @@ func (r *MinecraftReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			}
 		}
 		return ctrl.Result{}, nil
+	}
+
+	// check if pvc already exists, if not create a new one
+	foundPvc := &corev1.PersistentVolumeClaim{}
+	err = r.Get(ctx, types.NamespacedName{Name: minecraft.Name, Namespace: minecraft.Namespace}, foundPvc)
+	if err != nil && apierrors.IsNotFound(err) {
+		// define new pvc
+		pvc, err := r.pvcForMinecraft(minecraft)
+		if err != nil {
+			log.Error(err, "Failed to define new PVC resource for Minecraft")
+
+			// the following will update minecraft resource status
+			meta.SetStatusCondition(&minecraft.Status.Conditions, metav1.Condition{Type: typeAvailableMinecraft,
+				Status: metav1.ConditionFalse, Reason: "Reconciling",
+				Message: fmt.Sprintf("Failed to create PVC for the custom resource (%s): (%s)", minecraft.Name, err)})
+
+			if err := r.Status().Update(ctx, minecraft); err != nil {
+				log.Error(err, "Failed to update Minecraft status")
+				return ctrl.Result{}, err
+			}
+
+			return ctrl.Result{}, err
+		}
+
+		log.Info("Creating a new PVC",
+			"PVC.Namespace", pvc.Namespace, "PVC.Name", pvc.Name)
+		if err = r.Create(ctx, pvc); err != nil {
+			log.Error(err, "failed to create new PVC",
+				"PVC.Namespace", pvc.Namespace, "PVC.Name", pvc.Name)
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
+	} else if err != nil {
+		log.Error(err, "Failed to get PVC")
+		return ctrl.Result{}, err
 	}
 
 	// Check if the statefulset already exists, if not create a new one
@@ -484,6 +520,12 @@ func (r *MinecraftReconciler) statefulsetForMinecraft(
 								},
 							},
 						},
+						VolumeMounts: []corev1.VolumeMount{
+							{
+								Name:      minecraft.Name,
+								MountPath: "/data",
+							},
+						},
 						// TODO(user): Uncomment the following code to configure the resources
 						// Ensure restrictive context for the container
 						// More info: https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted
@@ -498,6 +540,17 @@ func (r *MinecraftReconciler) statefulsetForMinecraft(
 						// 	},
 						// },
 					}},
+					Volumes: []corev1.Volume{
+						{
+							Name: minecraft.Name,
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: minecraft.Name,
+									ReadOnly:  false,
+								},
+							},
+						},
+					},
 				},
 			},
 		},
@@ -559,6 +612,36 @@ func (r *MinecraftReconciler) configmapForMinecraft(
 		return nil, err
 	}
 	return configmap, nil
+}
+
+func (r *MinecraftReconciler) pvcForMinecraft(
+	minecraft *cachev1alpha1.Minecraft) (*corev1.PersistentVolumeClaim, error) {
+
+	ls := labelsForMinecraft(minecraft)
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      minecraft.Name,
+			Namespace: minecraft.Namespace,
+			Labels:    ls,
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{
+				corev1.ReadWriteOnce,
+			},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("2Gi"),
+				},
+			},
+			VolumeName: minecraft.Name,
+		},
+	}
+
+	if err := ctrl.SetControllerReference(minecraft, pvc, r.Scheme); err != nil {
+		return nil, err
+	}
+
+	return pvc, nil
 }
 
 // labelsForMinecraft returns the labels for selecting the resources
