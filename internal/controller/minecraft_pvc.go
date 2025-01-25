@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"time"
 
 	cachev1alpha1 "github.com/example/minecraft-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -59,7 +58,7 @@ func (r *MinecraftReconciler) createMinecraftPVC(
 			"PVC.Namespace", pvc.Namespace, "PVC.Name", pvc.Name)
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: time.Minute}, nil
+	return ctrl.Result{Requeue: true}, nil
 
 }
 

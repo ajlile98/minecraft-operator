@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"time"
 
 	cachev1alpha1 "github.com/example/minecraft-operator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -61,7 +60,7 @@ func (r *MinecraftReconciler) createMinecraftService(
 	// Service created successfully
 	// We will requeue the reconciliation so that we can ensure the state
 	// and move forward for the next operations
-	return ctrl.Result{RequeueAfter: time.Minute}, nil
+	return ctrl.Result{Requeue: true}, nil
 }
 
 // serviceForMinecraft returns a Minecraft Service object
@@ -72,6 +71,9 @@ func (r *MinecraftReconciler) serviceForMinecraft(
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      minecraft.Name,
 			Namespace: minecraft.Namespace,
+			Annotations: map[string]string{
+				"mc-router.itzg.me/externalServerName": minecraft.Name + ".andylile.com",
+			},
 		},
 		Spec: corev1.ServiceSpec{
 			Selector: ls,
