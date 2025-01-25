@@ -230,12 +230,21 @@ func (r *MinecraftReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
+	configmap := &corev1.ConfigMap{}
+	err = r.Get(ctx, types.NamespacedName{Name: minecraft.Name, Namespace: minecraft.Namespace}, configmap)
+	if err != nil && apierrors.IsNotFound(err) {
+		return r.createMinecraftConfigMap(ctx, minecraft)
+	} else if err != nil {
+		log.Error(err, "Failed to get ConfigMap")
+		// return error for the reconciliation be retriggered
+		return ctrl.Result{}, err
+	}
+
 	// Check if the statefulset already exists, if not create a new one
 	found := &appsv1.StatefulSet{}
 	err = r.Get(ctx, types.NamespacedName{Name: minecraft.Name, Namespace: minecraft.Namespace}, found)
 	if err != nil && apierrors.IsNotFound(err) {
-		result, err := r.createMinecraftStatefulSet(ctx, minecraft)
-		return result, err
+		return r.createMinecraftStatefulSet(ctx, minecraft)
 	} else if err != nil {
 		log.Error(err, "Failed to get StatefulSet")
 		// Let's return the error for the reconciliation be re-trigged again
@@ -278,45 +287,6 @@ func (r *MinecraftReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	} else if err != nil {
 		log.Error(err, "Failed to get Service")
 		// Let's return the error for the reconciliation be re-trigged again
-		return ctrl.Result{}, err
-	}
-
-	configmap := &corev1.ConfigMap{}
-	err = r.Get(ctx, types.NamespacedName{Name: minecraft.Name, Namespace: minecraft.Namespace}, configmap)
-	if err != nil && apierrors.IsNotFound(err) {
-		// Define new configmap
-		cm, err := r.configmapForMinecraft(minecraft)
-		if err != nil {
-			log.Error(err, "Failed to create new ConfigMap resource for Minecraft")
-
-			// the following will update the status
-			meta.SetStatusCondition(&minecraft.Status.Conditions, metav1.Condition{Type: typeAvailableMinecraft,
-				Status: metav1.ConditionFalse, Reason: "Reconciling",
-				Message: fmt.Sprintf("Failed to creat ConfigMap for the custom resource (%s): (%s)", minecraft.Name, err)})
-
-			if err := r.Status().Update(ctx, minecraft); err != nil {
-				log.Error(err, "Failed to update Minecraft Status")
-				return ctrl.Result{}, err
-			}
-
-			return ctrl.Result{}, err
-		}
-
-		log.Info("Creating a new ConfigMap",
-			"ConfigMap.Namespace", cm.Namespace, "ConfigMap.Name", cm.Name)
-		if err = r.Create(ctx, cm); err != nil {
-			log.Error(err, "Failed to create a new ConfigMap",
-				"ConfigMap.Namespace", cm.Namespace, "Service.Name", cm.Name)
-			return ctrl.Result{}, err
-		}
-
-		// ConfigMap created Successfully
-		// Requeue reconciliation so that we can ensure the state
-		// and move forward for the next operations
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
-	} else if err != nil {
-		log.Error(err, "Failed to get ConfigMap")
-		// return error for the reconciliation be retriggered
 		return ctrl.Result{}, err
 	}
 
@@ -420,26 +390,6 @@ func (r *MinecraftReconciler) serviceForMinecraft(
 		return nil, err
 	}
 	return service, nil
-}
-
-func (r *MinecraftReconciler) configmapForMinecraft(
-	minecraft *cachev1alpha1.Minecraft) (*corev1.ConfigMap, error) {
-	ls := labelsForMinecraft(minecraft)
-	configmap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      minecraft.Name,
-			Namespace: minecraft.Namespace,
-			Labels:    ls,
-		},
-		Data: map[string]string{
-			"EULA": "TRUE",
-		},
-	}
-
-	if err := ctrl.SetControllerReference(minecraft, configmap, r.Scheme); err != nil {
-		return nil, err
-	}
-	return configmap, nil
 }
 
 func (r *MinecraftReconciler) pvcForMinecraft(
