@@ -227,7 +227,7 @@ func (r *MinecraftReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	service := &corev1.Service{}
 	err = r.Get(ctx, types.NamespacedName{Name: minecraft.Name, Namespace: minecraft.Namespace}, service)
 	if err != nil && apierrors.IsNotFound(err) {
-		return r.createMinecraftPVC(ctx, minecraft)
+		return r.createMinecraftService(ctx, minecraft)
 	} else if err != nil {
 		log.Error(err, "Failed to get Service")
 		// Let's return the error for the reconciliation be re-trigged again
