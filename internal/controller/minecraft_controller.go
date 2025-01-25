@@ -70,6 +70,7 @@ type MinecraftReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=minecrafts.cache.example.com,resources=minecrafts,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -616,7 +617,6 @@ func (r *MinecraftReconciler) configmapForMinecraft(
 
 func (r *MinecraftReconciler) pvcForMinecraft(
 	minecraft *cachev1alpha1.Minecraft) (*corev1.PersistentVolumeClaim, error) {
-
 	ls := labelsForMinecraft(minecraft)
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
@@ -633,7 +633,6 @@ func (r *MinecraftReconciler) pvcForMinecraft(
 					corev1.ResourceStorage: resource.MustParse("2Gi"),
 				},
 			},
-			VolumeName: minecraft.Name,
 		},
 	}
 
@@ -652,10 +651,11 @@ func labelsForMinecraft(minecraft *cachev1alpha1.Minecraft) map[string]string {
 	if err == nil {
 		imageTag = strings.Split(image, ":")[1]
 	}
-	ls := minecraft.ObjectMeta.Labels
+	ls := make(map[string]string) // Initialize the map
 	ls["app.kubernetes.io/name"] = "minecraft-operator"
 	ls["app.kubernetes.io/version"] = imageTag
 	ls["app.kubernetes.io/managed-by"] = "MinecraftController"
+	ls["cache.example.com/name"] = minecraft.Name
 
 	return ls
 }
