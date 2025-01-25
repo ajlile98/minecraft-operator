@@ -19,14 +19,11 @@ package controller
 import (
 	"context"
 	"fmt"
-	"time"
 
-	// appsv1 "k8s.io/api/apps/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -199,32 +196,7 @@ func (r *MinecraftReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	foundPvc := &corev1.PersistentVolumeClaim{}
 	err = r.Get(ctx, types.NamespacedName{Name: minecraft.Name, Namespace: minecraft.Namespace}, foundPvc)
 	if err != nil && apierrors.IsNotFound(err) {
-		// define new pvc
-		pvc, err := r.pvcForMinecraft(minecraft)
-		if err != nil {
-			log.Error(err, "Failed to define new PVC resource for Minecraft")
-
-			// the following will update minecraft resource status
-			meta.SetStatusCondition(&minecraft.Status.Conditions, metav1.Condition{Type: typeAvailableMinecraft,
-				Status: metav1.ConditionFalse, Reason: "Reconciling",
-				Message: fmt.Sprintf("Failed to create PVC for the custom resource (%s): (%s)", minecraft.Name, err)})
-
-			if err := r.Status().Update(ctx, minecraft); err != nil {
-				log.Error(err, "Failed to update Minecraft status")
-				return ctrl.Result{}, err
-			}
-
-			return ctrl.Result{}, err
-		}
-
-		log.Info("Creating a new PVC",
-			"PVC.Namespace", pvc.Namespace, "PVC.Name", pvc.Name)
-		if err = r.Create(ctx, pvc); err != nil {
-			log.Error(err, "failed to create new PVC",
-				"PVC.Namespace", pvc.Namespace, "PVC.Name", pvc.Name)
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
+		return r.createMinecraftPVC(ctx, minecraft)
 	} else if err != nil {
 		log.Error(err, "Failed to get PVC")
 		return ctrl.Result{}, err
@@ -241,8 +213,8 @@ func (r *MinecraftReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Check if the statefulset already exists, if not create a new one
-	found := &appsv1.StatefulSet{}
-	err = r.Get(ctx, types.NamespacedName{Name: minecraft.Name, Namespace: minecraft.Namespace}, found)
+	statefulset := &appsv1.StatefulSet{}
+	err = r.Get(ctx, types.NamespacedName{Name: minecraft.Name, Namespace: minecraft.Namespace}, statefulset)
 	if err != nil && apierrors.IsNotFound(err) {
 		return r.createMinecraftStatefulSet(ctx, minecraft)
 	} else if err != nil {
@@ -255,89 +227,14 @@ func (r *MinecraftReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	service := &corev1.Service{}
 	err = r.Get(ctx, types.NamespacedName{Name: minecraft.Name, Namespace: minecraft.Namespace}, service)
 	if err != nil && apierrors.IsNotFound(err) {
-		// Define a new service
-		svc, err := r.serviceForMinecraft(minecraft)
-		if err != nil {
-			log.Error(err, "Failed to define new Service resource for Minecraft")
-
-			// The following implementation will update the status
-			meta.SetStatusCondition(&minecraft.Status.Conditions, metav1.Condition{Type: typeAvailableMinecraft,
-				Status: metav1.ConditionFalse, Reason: "Reconciling",
-				Message: fmt.Sprintf("Failed to create Service for the custom resource (%s): (%s)", minecraft.Name, err)})
-			if err := r.Status().Update(ctx, minecraft); err != nil {
-				log.Error(err, "Failed to update Minecraft status")
-				return ctrl.Result{}, err
-			}
-
-			return ctrl.Result{}, err
-		}
-
-		log.Info("Creating a new Service",
-			"Service.Namespace", svc.Namespace, "Service.Name", svc.Name)
-		if err = r.Create(ctx, svc); err != nil {
-			log.Error(err, "Failed to create new Service",
-				"Service.Namespace", svc.Namespace, "Service.Name", svc.Name)
-			return ctrl.Result{}, err
-		}
-
-		// Service created successfully
-		// We will requeue the reconciliation so that we can ensure the state
-		// and move forward for the next operations
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
+		return r.createMinecraftPVC(ctx, minecraft)
 	} else if err != nil {
 		log.Error(err, "Failed to get Service")
 		// Let's return the error for the reconciliation be re-trigged again
 		return ctrl.Result{}, err
 	}
 
-	// The CRD API defines that the Minecraft type have a MinecraftSpec.Size field
-	// to set the quantity of Statefulset instances to the desired state on the cluster.
-	// Therefore, the following code will ensure the Statefulset size is the same as defined
-	// via the Size spec of the Custom Resource which we are reconciling.
-	size := minecraft.Spec.Size
-	if *found.Spec.Replicas != size {
-		found.Spec.Replicas = &size
-		if err = r.Update(ctx, found); err != nil {
-			log.Error(err, "Failed to update Statefulset",
-				"Statefulset.Namespace", found.Namespace, "Statefulset.Name", found.Name)
-
-			// Re-fetch the minecraft Custom Resource before updating the status
-			// so that we have the latest state of the resource on the cluster and we will avoid
-			// raising the error "the object has been modified, please apply
-			// your changes to the latest version and try again" which would re-trigger the reconciliation
-			if err := r.Get(ctx, req.NamespacedName, minecraft); err != nil {
-				log.Error(err, "Failed to re-fetch minecraft")
-				return ctrl.Result{}, err
-			}
-
-			// The following implementation will update the status
-			meta.SetStatusCondition(&minecraft.Status.Conditions, metav1.Condition{Type: typeAvailableMinecraft,
-				Status: metav1.ConditionFalse, Reason: "Resizing",
-				Message: fmt.Sprintf("Failed to update the size for the custom resource (%s): (%s)", minecraft.Name, err)})
-
-			if err := r.Status().Update(ctx, minecraft); err != nil {
-				log.Error(err, "Failed to update Minecraft status")
-				return ctrl.Result{}, err
-			}
-
-			return ctrl.Result{}, err
-		}
-
-		// Now, that we update the size we want to requeue the reconciliation
-		// so that we can ensure that we have the latest state of the resource before
-		// update. Also, it will help ensure the desired state on the cluster
-		return ctrl.Result{Requeue: true}, nil
-	}
-
-	// The following implementation will update the status
-	meta.SetStatusCondition(&minecraft.Status.Conditions, metav1.Condition{Type: typeAvailableMinecraft,
-		Status: metav1.ConditionTrue, Reason: "Reconciling",
-		Message: fmt.Sprintf("Statefulset for custom resource (%s) with %d replicas created successfully", minecraft.Name, size)})
-
-	if err := r.Status().Update(ctx, minecraft); err != nil {
-		log.Error(err, "Failed to update Minecraft status")
-		return ctrl.Result{}, err
-	}
+	// r.updateMinecraftSizeField(ctx, minecraft, statefulset)
 
 	return ctrl.Result{}, nil
 }
@@ -360,62 +257,4 @@ func (r *MinecraftReconciler) doFinalizerOperationsForMinecraft(cr *cachev1alpha
 		fmt.Sprintf("Custom Resource %s is being deleted from the namespace %s",
 			cr.Name,
 			cr.Namespace))
-}
-
-// serviceForMinecraft returns a Minecraft Service object
-func (r *MinecraftReconciler) serviceForMinecraft(
-	minecraft *cachev1alpha1.Minecraft) (*corev1.Service, error) {
-	ls := labelsForMinecraft(minecraft)
-	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      minecraft.Name,
-			Namespace: minecraft.Namespace,
-		},
-		Spec: corev1.ServiceSpec{
-			Selector: ls,
-			Ports: []corev1.ServicePort{
-				{
-					Name:     "minecraft",
-					Protocol: corev1.ProtocolTCP,
-					Port:     25565,
-					// TargetPort: intstr.FromInt(25565),
-				},
-			},
-		},
-	}
-
-	// Set the ownerRef for the Service
-	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
-	if err := ctrl.SetControllerReference(minecraft, service, r.Scheme); err != nil {
-		return nil, err
-	}
-	return service, nil
-}
-
-func (r *MinecraftReconciler) pvcForMinecraft(
-	minecraft *cachev1alpha1.Minecraft) (*corev1.PersistentVolumeClaim, error) {
-	ls := labelsForMinecraft(minecraft)
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      minecraft.Name,
-			Namespace: minecraft.Namespace,
-			Labels:    ls,
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteOnce,
-			},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse("2Gi"),
-				},
-			},
-		},
-	}
-
-	if err := ctrl.SetControllerReference(minecraft, pvc, r.Scheme); err != nil {
-		return nil, err
-	}
-
-	return pvc, nil
 }

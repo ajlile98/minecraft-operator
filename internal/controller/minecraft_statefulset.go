@@ -69,7 +69,7 @@ func (r *MinecraftReconciler) createMinecraftStatefulSet(
 func (r *MinecraftReconciler) statefulsetForMinecraft(
 	minecraft *cachev1alpha1.Minecraft) (*appsv1.StatefulSet, error) {
 	ls := labelsForMinecraft(minecraft)
-	replicas := minecraft.Spec.Size
+	replicas := int32(1) //minecraft.Spec.Size
 
 	// Get the Operand image
 	image, err := imageForMinecraft()

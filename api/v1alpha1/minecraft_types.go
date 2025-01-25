@@ -34,7 +34,7 @@ type MinecraftSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=3
 	// +kubebuilder:validation:ExclusiveMaximum=false
-	Size int32 `json:"size,omitempty"`
+	// Size int32 `json:"size,omitempty"`
 }
 
 // MinecraftStatus defines the observed state of Minecraft
