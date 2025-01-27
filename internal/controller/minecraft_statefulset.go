@@ -90,6 +90,7 @@ func (r *MinecraftReconciler) statefulsetForMinecraft(
 			Selector: &metav1.LabelSelector{
 				MatchLabels: ls,
 			},
+			ServiceName: minecraft.Name,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: ls,
@@ -158,7 +159,7 @@ func (r *MinecraftReconciler) statefulsetForMinecraft(
 						},
 						ReadinessProbe: &corev1.Probe{
 							InitialDelaySeconds: 30,
-							PeriodSeconds:       15,
+							PeriodSeconds:       5,
 							ProbeHandler: corev1.ProbeHandler{
 								Exec: &corev1.ExecAction{
 									Command: []string{"mc-monitor", "status"},

@@ -53,6 +53,7 @@ func labelsForMinecraft(minecraft *cachev1alpha1.Minecraft) map[string]string {
 	ls["app.kubernetes.io/version"] = imageTag
 	ls["app.kubernetes.io/managed-by"] = "MinecraftController"
 	ls["cache.example.com/name"] = minecraft.Name
+	ls["containertype"] = "minecraft-server"
 
 	return ls
 }
